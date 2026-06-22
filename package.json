@@ -1,0 +1,10 @@
+{
+  "name": "study-monster",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "스터디 그룹 출석/경고/벌금 자동화 — 규칙 엔진 코어",
+  "scripts": {
+    "test": "node --test"
+  }
+}
