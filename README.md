@@ -80,21 +80,36 @@ GET  /                                   프론트엔드(단일 HTML) 서빙
 멤버: 주간 현황·사유 신고·분위기저해 신고. 관리자: 멤버 추가(토큰 발급)·정산·
 자동 퇴장·강제 퇴장·OTHER 사유 승인. (프로덕션은 동일 API 계약으로 Next.js 이전 가능)
 
+## 데이터베이스
+
+실제 PostgreSQL 에 연결한다(`pg`). `createServer` 는 `Queryable` 을 주입받으므로,
+프로덕션은 `asQueryable(createPgPool(DATABASE_URL))` 만 넘기면 된다.
+
+```
+src/api/
+  pg.ts        실제 pg.Pool 팩토리 + Queryable 어댑터
+  migrate.ts   schema.sql 적용(멱등)
+  main.ts      프로덕션 엔트리포인트 (env → pg → migrate → 서버)
+```
+
+로컬엔 Postgres 서버가 없어도, `pg-mem`(인메모리지만 진짜 SQL 엔진)으로 실제
+schema.sql·파라미터화 쿼리·`ON CONFLICT`·`UNIQUE`/`CHECK`·집계를 그대로 검증한다.
+(`dev`/`db:demo` 가 pg-mem 사용 — 영속성은 없음)
+
 ## 실행
 
 ```bash
-npm test          # 전체 테스트
-npm run demo      # 라이브 신뢰경계 데모(HTTP 시나리오, 인메모리)
-npm run dev       # 프론트+API 개발 서버 → http://localhost:8787
+npm test          # 전체 테스트 (113건)
+npm run db:demo   # 실제 SQL(pg-mem) 위에서 전체 스택 end-to-end 검증
+npm run demo      # 라이브 신뢰경계 데모(HTTP 시나리오)
+npm run dev       # 프론트+API 개발 서버(실제 SQL/pg-mem) → http://localhost:8787
                   #   (콘솔에 출력된 관리자 토큰으로 접속)
+npm start         # 프로덕션: 실제 Postgres(DATABASE_URL) 연결 + 서버
 ```
-
-`demo`/`dev` 는 인메모리 저장소를 쓴다(영속성 없음). 실배포는 같은 `createServer`
-에 `pg.Pool` 만 주입하면 된다.
 
 ## 다음 단계
 
-1. 실제 PostgreSQL 연결(`pg.Pool`) + 마이그레이션 러너 + Railway 배포
+1. Railway 배포 (Postgres 플러그인 + 환경변수 + `npm start`)
 2. Daily.co 클라이언트 SDK 연동(화상 + 출석 webhook 송출)
 3. (선택) 프론트엔드 Next.js 이전
 

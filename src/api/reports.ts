@@ -33,10 +33,11 @@ export async function submitDisturbanceReport(
   }
 
   // ON CONFLICT DO NOTHING: UNIQUE(session, reporter, target) 위반 시 중복으로 처리.
+  // (컬럼 리스트 형태 — 제약 이름에 의존하지 않아 이식성이 높다.)
   const { rowCount } = await db.run(sql`
     INSERT INTO disturbance_reports (session_id, reporter_id, target_member_id)
     VALUES (${sessionId}, ${reporter.memberId}, ${targetMemberId})
-    ON CONFLICT ON CONSTRAINT uq_report_once DO NOTHING
+    ON CONFLICT (session_id, reporter_id, target_member_id) DO NOTHING
   `);
 
   return rowCount > 0 ? { status: "recorded" } : { status: "duplicate" };
