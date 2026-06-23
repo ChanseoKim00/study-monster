@@ -68,3 +68,33 @@ export async function seedAdminIfNone(
   await createMember(db, { ...params, role: "admin" });
   return issueToken(db, params.id);
 }
+
+export interface BootstrapResult {
+  /** 이번 부팅에서 관리자를 새로 만들었는지. */
+  created: boolean;
+  memberId?: string;
+  /** 새로 발급된 관리자 토큰(평문). created=true 일 때만. */
+  token?: string;
+}
+
+/**
+ * 환경변수 기반 최초 관리자 부트스트랩 (배포 직후 로그인 입구).
+ * ADMIN_BOOTSTRAP_ID 가 있고 아직 관리자가 없으면 관리자를 시드하고 토큰을 반환한다.
+ * 관리자가 이미 있으면 아무것도 하지 않는다(멱등) → 변수를 남겨둬도 안전.
+ *
+ * 호출 측(main.ts)이 token 을 로그에 1회 출력한다. 운영자는 로그인 후
+ * 토큰을 안전히 보관하고, 원하면 이 변수를 제거하면 된다.
+ */
+export async function bootstrapAdmin(
+  db: Db,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<BootstrapResult> {
+  const id = env.ADMIN_BOOTSTRAP_ID?.trim();
+  if (!id) return { created: false };
+  const token = await seedAdminIfNone(db, {
+    id,
+    displayName: env.ADMIN_BOOTSTRAP_NAME?.trim() || id,
+  });
+  if (!token) return { created: false };
+  return { created: true, memberId: id, token };
+}
