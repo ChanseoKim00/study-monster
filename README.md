@@ -40,9 +40,30 @@ src/api/
   schema.sql   members/auth_tokens/presence_events/disturbance_reports/rule_settings
   auth.ts      토큰 해시 인증 + role 기반 관리자 인가/권한 분리 (#4)
   reports.ts   신고자 인증 + (세션,신고자,대상) 중복 차단 + 자기신고 금지 (#5)
-  handlers.ts  webhook/admin/report 엔드포인트로 위 모듈 통합
-  server.ts    node http 어댑터 (webhook raw body 보존)
+  tokens.ts    crypto 랜덤 토큰 발급(평문 1회 반환, DB엔 해시만) + 관리자 시드
+  reasons.ts   본인 출결 사유 신고(대리 차단) + OTHER 관리자 승인
+  aggregate.ts presence_events(+사유+신고) → 코어 판정 → 주간 벌금
+  settlement.ts 주간 n분의1 환급 계산 + 연속 벌금주 자동 퇴장
+  handlers.ts  webhook/admin/report/사유/주간/정산/자동퇴장 엔드포인트로 통합
+  server.ts    node http 어댑터 (webhook raw body 보존, 본문 1MB 상한)
 ```
+
+엔드포인트:
+
+```
+POST /webhooks/daily            Daily 출석 이벤트 (서명 검증 필수)
+POST /reports/disturbance       분위기저해 신고 (인증, 중복/자기신고 차단)
+POST /reasons                   본인 출결 사유 신고
+POST /admin/reasons/approve     OTHER 사유 승인 (관리자)
+PUT  /admin/rooms/:id/settings  규칙 설정 변경 (관리자, 구조·충돌 검증)
+POST /admin/members/:id/exit    강제 퇴장 (관리자)
+GET  /weekly?memberId&mondayDate         주간 벌금 판정 (본인/관리자)
+GET  /admin/settlement?mondayDate        주간 정산 n분의1 (관리자)
+POST /admin/auto-exit/run?mondayDate     연속 벌금주 자동 퇴장 (관리자)
+```
+
+참고: 정산/자동퇴장은 멤버×주×세션을 코어로 재계산하는 N+1 쿼리다. 친구 규모(소수)
+에선 무해하지만, 멤버가 늘면 세션별 SessionResult 캐싱/집계 쿼리로 최적화 여지가 있다.
 
 핵심 신뢰경계: **서명 검증을 통과하지 못한 webhook 은 DB 에 닿기 전에 거부**한다.
 검증이 없으면 멤버가 가짜 입장 이벤트를 직접 쏴서 출석을 조작할 수 있기 때문.

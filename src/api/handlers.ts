@@ -4,11 +4,15 @@ import { verifyDailyWebhook } from "./webhook.ts";
 import {
   authenticate,
   requireAdmin,
+  requireSelfOrAdmin,
   AuthnError,
   AuthzError,
 } from "./auth.ts";
 import { submitDisturbanceReport } from "./reports.ts";
 import { declareReason, approveOtherReason } from "./reasons.ts";
+import { computeMemberWeek } from "./aggregate.ts";
+import { computeWeekSettlement, runAutoExit } from "./settlement.ts";
+import { DEFAULT_SETTINGS } from "../settings.ts";
 import { validateRoomSettings } from "../validation.ts";
 import type { RuleSettings } from "../types.ts";
 
@@ -23,6 +27,8 @@ export interface HttpRequest {
   headers: Record<string, string | string[] | undefined>;
   /** 검증을 위해 반드시 raw 문자열로 보존 (재직렬화 금지). */
   rawBody: string;
+  /** 파싱된 쿼리스트링 (선택). */
+  query?: Record<string, string | undefined>;
 }
 
 export interface HttpResponse {
@@ -185,6 +191,94 @@ export async function handleSubmitReport(
       targetMemberId: body.targetMemberId,
     });
     return json(out.status === "recorded" ? 201 : 200, out);
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+const MONDAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 저장된 방 설정을 불러온다. 없거나 roomId 미지정이면 기본값. */
+async function loadSettings(
+  ctx: Ctx,
+  roomId: string | undefined,
+): Promise<RuleSettings> {
+  if (!roomId) return DEFAULT_SETTINGS;
+  const row = await ctx.db.one<{ settings: RuleSettings }>(sql`
+    SELECT settings FROM rule_settings WHERE room_id = ${roomId}
+  `);
+  // jsonb 는 드라이버가 객체로 돌려준다. 형식이 깨졌으면 기본값으로 안전 복귀.
+  return row && isRuleSettingsShape(row.settings) ? row.settings : DEFAULT_SETTINGS;
+}
+
+/**
+ * GET /weekly — 한 멤버의 한 주 벌금 판정. 본인 또는 관리자만.
+ */
+export async function handleWeeklyStatus(
+  ctx: Ctx,
+  req: HttpRequest,
+  args: { memberId: string; mondayDate: string; roomId?: string },
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    requireSelfOrAdmin(principal, args.memberId); // 남의 현황 조회 차단
+    if (!MONDAY_RE.test(args.mondayDate)) {
+      return json(400, { error: "mondayDate 는 YYYY-MM-DD 형식이어야 합니다." });
+    }
+    const settings = await loadSettings(ctx, args.roomId);
+    const result = await computeMemberWeek(ctx.db, settings, {
+      memberId: args.memberId,
+      mondayDate: args.mondayDate,
+    });
+    return json(200, result);
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+/**
+ * GET /admin/settlement — 한 주 정산(n분의1 환급). 관리자 전용.
+ */
+export async function handleSettlement(
+  ctx: Ctx,
+  req: HttpRequest,
+  args: { mondayDate: string; roomId?: string },
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    requireAdmin(principal);
+    if (!MONDAY_RE.test(args.mondayDate)) {
+      return json(400, { error: "mondayDate 는 YYYY-MM-DD 형식이어야 합니다." });
+    }
+    const settings = await loadSettings(ctx, args.roomId);
+    const result = await computeWeekSettlement(ctx.db, settings, {
+      mondayDate: args.mondayDate,
+    });
+    return json(200, result);
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+/**
+ * POST /admin/auto-exit/run — 연속 벌금주 누적 멤버 자동 퇴장. 관리자 전용.
+ */
+export async function handleRunAutoExit(
+  ctx: Ctx,
+  req: HttpRequest,
+  args: { throughMondayDate: string; roomId?: string },
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    requireAdmin(principal);
+    if (!MONDAY_RE.test(args.throughMondayDate)) {
+      return json(400, { error: "throughMondayDate 는 YYYY-MM-DD 형식이어야 합니다." });
+    }
+    const settings = await loadSettings(ctx, args.roomId);
+    const decisions = await runAutoExit(ctx.db, settings, {
+      throughMondayDate: args.throughMondayDate,
+    });
+    return json(200, { decisions });
   } catch (e) {
     return errorResponse(e);
   }

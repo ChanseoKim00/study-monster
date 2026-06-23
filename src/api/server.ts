@@ -8,6 +8,9 @@ import {
   handleSubmitReport,
   handleDeclareReason,
   handleApproveReason,
+  handleWeeklyStatus,
+  handleSettlement,
+  handleRunAutoExit,
   type Ctx,
   type HttpRequest,
   type HttpResponse,
@@ -70,6 +73,26 @@ async function route(ctx: Ctx, hreq: HttpRequest): Promise<HttpResponse> {
   if (method === "POST" && m) {
     return handleForceExit(ctx, hreq, { memberId: decodeURIComponent(m[1]) });
   }
+  const q = hreq.query ?? {};
+  if (method === "GET" && path === "/weekly") {
+    return handleWeeklyStatus(ctx, hreq, {
+      memberId: q.memberId ?? "",
+      mondayDate: q.mondayDate ?? "",
+      roomId: q.roomId,
+    });
+  }
+  if (method === "GET" && path === "/admin/settlement") {
+    return handleSettlement(ctx, hreq, {
+      mondayDate: q.mondayDate ?? "",
+      roomId: q.roomId,
+    });
+  }
+  if (method === "POST" && path === "/admin/auto-exit/run") {
+    return handleRunAutoExit(ctx, hreq, {
+      throughMondayDate: q.mondayDate ?? "",
+      roomId: q.roomId,
+    });
+  }
   return { status: 404, body: { error: "not found" } };
 }
 
@@ -89,6 +112,7 @@ export function createServer(pool: Queryable): http.Server {
         path: url.pathname,
         headers: req.headers,
         rawBody,
+        query: Object.fromEntries(url.searchParams),
       };
       const result = await route(ctx, hreq);
       res.writeHead(result.status, { "content-type": "application/json" });

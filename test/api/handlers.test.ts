@@ -5,6 +5,9 @@ import {
   handleUpdateSettings,
   handleForceExit,
   handleSubmitReport,
+  handleWeeklyStatus,
+  handleSettlement,
+  handleRunAutoExit,
   type Ctx,
   type HttpRequest,
 } from "../../src/api/handlers.ts";
@@ -237,4 +240,79 @@ test("report 인증은 토큰 해시로 조회", async () => {
   };
   await handleSubmitReport(ctx(fake), req);
   assert.ok((fake.calls[0].params as string[]).includes(hashToken("secret-token")));
+});
+
+// ── B2/B3: 집계/정산/자동퇴장 인가 ──
+
+test("weekly: 남의 현황 조회는 403", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("member")]); // m1
+  const req: HttpRequest = {
+    method: "GET",
+    path: "/weekly",
+    rawBody: "",
+    headers: { authorization: "Bearer t" },
+  };
+  const res = await handleWeeklyStatus(ctx(fake), req, {
+    memberId: "someone-else",
+    mondayDate: "2026-06-22",
+  });
+  assert.equal(res.status, 403);
+});
+
+test("weekly: 잘못된 mondayDate 형식은 400", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("member")]);
+  const req: HttpRequest = {
+    method: "GET", path: "/weekly", rawBody: "",
+    headers: { authorization: "Bearer t" },
+  };
+  const res = await handleWeeklyStatus(ctx(fake), req, {
+    memberId: "m1", mondayDate: "2026/06/22",
+  });
+  assert.equal(res.status, 400);
+});
+
+test("weekly: 본인 현황은 조회 가능(200)", async () => {
+  const fake = new FakeQueryable()
+    .enqueue([authRow("member")]) // 인증
+    .enqueue([]); // 그 주 세션 없음 → fine 0
+  const req: HttpRequest = {
+    method: "GET", path: "/weekly", rawBody: "",
+    headers: { authorization: "Bearer t" },
+  };
+  const res = await handleWeeklyStatus(ctx(fake), req, {
+    memberId: "m1", mondayDate: "2026-06-22",
+  });
+  assert.equal(res.status, 200);
+});
+
+test("settlement: 일반 멤버는 403", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("member")]);
+  const req: HttpRequest = {
+    method: "GET", path: "/admin/settlement", rawBody: "",
+    headers: { authorization: "Bearer t" },
+  };
+  const res = await handleSettlement(ctx(fake), req, { mondayDate: "2026-06-22" });
+  assert.equal(res.status, 403);
+});
+
+test("auto-exit: 토큰 없으면 401", async () => {
+  const fake = new FakeQueryable();
+  const req: HttpRequest = {
+    method: "POST", path: "/admin/auto-exit/run", rawBody: "", headers: {},
+  };
+  const res = await handleRunAutoExit(ctx(fake), req, { throughMondayDate: "2026-06-22" });
+  assert.equal(res.status, 401);
+});
+
+test("auto-exit: 관리자는 실행 가능(200)", async () => {
+  const fake = new FakeQueryable()
+    .enqueue([authRow("admin")]) // 인증
+    .enqueue([]); // 활성 멤버 없음 → 결정 빈 배열
+  const req: HttpRequest = {
+    method: "POST", path: "/admin/auto-exit/run", rawBody: "",
+    headers: { authorization: "Bearer admin-token" },
+  };
+  const res = await handleRunAutoExit(ctx(fake), req, { throughMondayDate: "2026-06-22" });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { decisions: [] });
 });
