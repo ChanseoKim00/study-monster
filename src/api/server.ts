@@ -6,6 +6,8 @@ import {
   handleUpdateSettings,
   handleForceExit,
   handleSubmitReport,
+  handleDeclareReason,
+  handleApproveReason,
   type Ctx,
   type HttpRequest,
   type HttpResponse,
@@ -48,6 +50,12 @@ async function route(ctx: Ctx, hreq: HttpRequest): Promise<HttpResponse> {
   }
   if (method === "POST" && path === "/reports/disturbance") {
     return handleSubmitReport(ctx, hreq);
+  }
+  if (method === "POST" && path === "/reasons") {
+    return handleDeclareReason(ctx, hreq);
+  }
+  if (method === "POST" && path === "/admin/reasons/approve") {
+    return handleApproveReason(ctx, hreq);
   }
   let m = /^\/admin\/rooms\/([^/]+)\/settings$/.exec(path);
   if (method === "PUT" && m) {

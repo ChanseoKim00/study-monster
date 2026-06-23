@@ -55,6 +55,21 @@ CREATE TABLE IF NOT EXISTS disturbance_reports (
 CREATE INDEX IF NOT EXISTS idx_reports_session_target
   ON disturbance_reports(session_id, target_member_id);
 
+-- 멤버가 직접 신고하는 출결 사유 (기획서 3.3).
+-- 세션당 멤버 1건(upsert). OVERTIME/SELF_DEVELOPMENT 는 자동 정당,
+-- VAGUE_PERSONAL 은 무단(주 N회 면제), OTHER 는 관리자 승인 시에만 정당.
+CREATE TABLE IF NOT EXISTS attendance_reasons (
+  session_id  TEXT NOT NULL REFERENCES sessions(id),
+  member_id   TEXT NOT NULL REFERENCES members(id),
+  reason      TEXT NOT NULL
+              CHECK (reason IN ('OVERTIME','SELF_DEVELOPMENT','VAGUE_PERSONAL','OTHER','NONE')),
+  -- OTHER 사유의 관리자 승인 여부. OTHER 외엔 의미 없음.
+  other_approved BOOLEAN NOT NULL DEFAULT FALSE,
+  approved_by TEXT REFERENCES members(id),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, member_id)
+);
+
 -- 관리자 설정 (방 단위). 변경은 admin 만 (보안항목 #4).
 CREATE TABLE IF NOT EXISTS rule_settings (
   room_id     TEXT PRIMARY KEY,

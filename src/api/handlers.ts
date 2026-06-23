@@ -8,6 +8,7 @@ import {
   AuthzError,
 } from "./auth.ts";
 import { submitDisturbanceReport } from "./reports.ts";
+import { declareReason, approveOtherReason } from "./reasons.ts";
 import { validateRoomSettings } from "../validation.ts";
 import type { RuleSettings } from "../types.ts";
 
@@ -220,6 +221,65 @@ function isRuleSettingsShape(v: unknown): v is RuleSettings {
     isNonNegNum(a.warnAfterConsecutiveFineWeeks) &&
     isNonNegNum(a.exitAfterConsecutiveFineWeeks)
   );
+}
+
+/**
+ * POST /reasons — 멤버가 자기 세션 출결 사유 신고. 본인 것만.
+ */
+export async function handleDeclareReason(
+  ctx: Ctx,
+  req: HttpRequest,
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    let body: { sessionId?: string; reason?: unknown };
+    try {
+      body = JSON.parse(req.rawBody);
+    } catch {
+      return json(400, { error: "잘못된 JSON" });
+    }
+    if (!body.sessionId) return json(400, { error: "sessionId 필요" });
+    const out = await declareReason(ctx.db, principal, {
+      sessionId: body.sessionId,
+      memberId: principal.memberId, // 본인 고정 — 클라이언트가 대상 못 바꿈
+      reason: body.reason,
+    });
+    return json(200, out);
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+/**
+ * POST /admin/reasons/approve — OTHER 사유 승인. 관리자 전용.
+ */
+export async function handleApproveReason(
+  ctx: Ctx,
+  req: HttpRequest,
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    requireAdmin(principal);
+    let body: { sessionId?: string; memberId?: string };
+    try {
+      body = JSON.parse(req.rawBody);
+    } catch {
+      return json(400, { error: "잘못된 JSON" });
+    }
+    if (!body.sessionId || !body.memberId) {
+      return json(400, { error: "sessionId, memberId 필요" });
+    }
+    const approved = await approveOtherReason(ctx.db, principal, {
+      sessionId: body.sessionId,
+      memberId: body.memberId,
+    });
+    if (!approved) {
+      return json(404, { error: "승인할 OTHER 사유가 없습니다." });
+    }
+    return json(200, { ok: true });
+  } catch (e) {
+    return errorResponse(e);
+  }
 }
 
 function header(req: HttpRequest, name: string): string | undefined {
