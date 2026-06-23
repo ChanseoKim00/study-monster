@@ -248,6 +248,31 @@ export async function handleCreateMember(
   }
 }
 
+/**
+ * GET /room — 화상 통화 접속 정보. 인증된 멤버에게 room URL 과 본인 표시 이름을 준다.
+ * 프론트가 이 값으로 Daily 영상을 임베드한다. 접속 이름 = memberId (출석 추적 연결용).
+ * DAILY_ROOM_URL 미설정이면 503.
+ */
+export async function handleRoom(
+  ctx: Ctx,
+  req: HttpRequest,
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    if (!ctx.config.dailyRoomUrl) {
+      return json(503, {
+        error: "화상 방이 아직 설정되지 않았습니다. 관리자에게 문의하세요(DAILY_ROOM_URL).",
+      });
+    }
+    return json(200, {
+      roomUrl: ctx.config.dailyRoomUrl,
+      userName: principal.memberId, // Daily 참가자 이름 = 멤버 ID
+    });
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
 const MONDAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** 저장된 방 설정을 불러온다. 없거나 roomId 미지정이면 기본값. */

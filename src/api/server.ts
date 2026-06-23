@@ -16,6 +16,7 @@ import {
   handleRunAutoExit,
   handleMe,
   handleCreateMember,
+  handleRoom,
   type Ctx,
   type HttpRequest,
   type HttpResponse,
@@ -67,6 +68,9 @@ async function route(ctx: Ctx, hreq: HttpRequest): Promise<HttpResponse> {
   }
   if (method === "GET" && path === "/me") {
     return handleMe(ctx, hreq);
+  }
+  if (method === "GET" && path === "/room") {
+    return handleRoom(ctx, hreq);
   }
   if (method === "POST" && path === "/admin/members") {
     return handleCreateMember(ctx, hreq);

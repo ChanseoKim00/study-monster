@@ -10,6 +10,7 @@ import {
   handleRunAutoExit,
   handleMe,
   handleCreateMember,
+  handleRoom,
   type Ctx,
   type HttpRequest,
 } from "../../src/api/handlers.ts";
@@ -21,7 +22,7 @@ import { DEFAULT_SETTINGS } from "../../src/settings.ts";
 
 const SECRET = Buffer.from("wh-secret").toString("base64");
 
-function ctx(fake: FakeQueryable): Ctx {
+function ctx(fake: FakeQueryable, extra: Partial<Ctx["config"]> = {}): Ctx {
   return {
     db: new Db(fake),
     config: {
@@ -29,6 +30,7 @@ function ctx(fake: FakeQueryable): Ctx {
       dailyApiKey: "x",
       dailyWebhookSecret: SECRET,
       webhookToleranceSeconds: 300,
+      ...extra,
     },
   };
 }
@@ -372,4 +374,31 @@ test("create member: 잘못된 role 거부(400)", async () => {
     headers: { authorization: "Bearer admin-token" },
   });
   assert.equal(res.status, 400);
+});
+
+// ── /room (화상) ──
+
+test("room: 인증 + 설정되면 roomUrl + userName(=memberId) 반환", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("member")]);
+  const res = await handleRoom(
+    ctx(fake, { dailyRoomUrl: "https://team.daily.co/study" }),
+    { method: "GET", path: "/room", rawBody: "", headers: { authorization: "Bearer t" } },
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { roomUrl: "https://team.daily.co/study", userName: "m1" });
+});
+
+test("room: 토큰 없으면 401", async () => {
+  const res = await handleRoom(ctx(new FakeQueryable(), { dailyRoomUrl: "https://x" }), {
+    method: "GET", path: "/room", rawBody: "", headers: {},
+  });
+  assert.equal(res.status, 401);
+});
+
+test("room: DAILY_ROOM_URL 미설정이면 503", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("member")]);
+  const res = await handleRoom(ctx(fake), {
+    method: "GET", path: "/room", rawBody: "", headers: { authorization: "Bearer t" },
+  });
+  assert.equal(res.status, 503);
 });

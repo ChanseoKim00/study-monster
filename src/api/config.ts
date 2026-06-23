@@ -17,6 +17,8 @@ export interface AppConfig {
   dailyWebhookSecret: string;
   /** webhook 타임스탬프 허용 오차(초). replay 방어. 기본 300s(5분). */
   webhookToleranceSeconds: number;
+  /** 멤버가 접속할 Daily room URL. 선택 — 없으면 화상 화면 비활성. */
+  dailyRoomUrl?: string;
 }
 
 /** 필수 키 목록 — 하나라도 비면 기동 실패. */
@@ -64,12 +66,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webhookToleranceSeconds = parsed;
   }
 
+  const dailyRoomUrl = env.DAILY_ROOM_URL?.trim();
+
   return {
     // non-null 단언: 위에서 missing 검사를 통과했으므로 존재가 보장된다.
     databaseUrl: env.DATABASE_URL!,
     dailyApiKey: env.DAILY_API_KEY!,
     dailyWebhookSecret: env.DAILY_WEBHOOK_SECRET!,
     webhookToleranceSeconds,
+    dailyRoomUrl: dailyRoomUrl || undefined,
   };
 }
 
@@ -84,5 +89,6 @@ export function redactConfig(config: AppConfig): Record<string, string> {
     DAILY_API_KEY: present(config.dailyApiKey),
     DAILY_WEBHOOK_SECRET: present(config.dailyWebhookSecret),
     WEBHOOK_TOLERANCE_SECONDS: String(config.webhookToleranceSeconds),
+    DAILY_ROOM_URL: config.dailyRoomUrl ? "set" : "missing",
   };
 }
