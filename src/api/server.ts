@@ -16,10 +16,24 @@ import {
 // 중요: webhook 서명 검증을 위해 본문을 "raw 문자열" 그대로 핸들러에 넘긴다.
 //       JSON 미들웨어가 파싱/재직렬화하기 전에 raw 를 잡아야 서명이 깨지지 않는다.
 
+/** 요청 본문 최대 크기(바이트). 초과 시 거부해 메모리 고갈(DoS)을 막는다. */
+const MAX_BODY_BYTES = 1024 * 1024; // 1MB — webhook/JSON 페이로드엔 충분
+
+class PayloadTooLargeError extends Error {}
+
 function readRawBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c) => chunks.push(c));
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new PayloadTooLargeError());
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
@@ -71,9 +85,11 @@ export function createServer(pool: Queryable): http.Server {
       const result = await route(ctx, hreq);
       res.writeHead(result.status, { "content-type": "application/json" });
       res.end(JSON.stringify(result.body));
-    } catch {
-      res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "내부 오류" }));
+    } catch (e) {
+      const status = e instanceof PayloadTooLargeError ? 413 : 500;
+      const error = status === 413 ? "요청 본문이 너무 큽니다." : "내부 오류";
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error }));
     }
   });
 }

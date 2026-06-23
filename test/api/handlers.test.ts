@@ -134,6 +134,34 @@ test("admin: 충돌나는 설정은 422 로 거부", async () => {
   assert.equal(res.status, 422);
 });
 
+test("admin: 깨진 설정(음수/누락)은 422, 저장 안 함", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("admin")]);
+  const broken = { ...DEFAULT_SETTINGS, fineAmount: -1 };
+  const req: HttpRequest = {
+    method: "PUT",
+    path: "/admin/rooms/r1/settings",
+    rawBody: JSON.stringify(broken),
+    headers: { authorization: "Bearer admin-token" },
+  };
+  const res = await handleUpdateSettings(ctx(fake), req, {
+    roomId: "r1",
+    sessionDurationMinutes: 120,
+  });
+  assert.equal(res.status, 422);
+  assert.equal(fake.calls.length, 1); // 인증만, INSERT 없음
+});
+
+test("webhook 실패 응답엔 실패 reason 을 노출하지 않는다 (오라클 차단)", async () => {
+  const res = await handleDailyWebhook(ctx(new FakeQueryable()), {
+    method: "POST",
+    path: "/webhooks/daily",
+    rawBody: "{}",
+    headers: {},
+  });
+  assert.equal(res.status, 401);
+  assert.ok(!("reason" in (res.body as object)));
+});
+
 test("admin: 토큰 없는 강제퇴장은 401", async () => {
   const fake = new FakeQueryable();
   const req: HttpRequest = {

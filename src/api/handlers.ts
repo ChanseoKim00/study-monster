@@ -59,8 +59,10 @@ export async function handleDailyWebhook(
     toleranceSeconds: ctx.config.webhookToleranceSeconds,
   });
   if (!verdict.ok) {
-    // 위조/replay 시도는 401. 이유는 로깅용으로만, 응답엔 최소 정보.
-    return json(401, { error: "서명 검증 실패", reason: verdict.reason });
+    // 위조/replay 시도는 401. 실패 '이유'는 서버 로그로만 남기고,
+    // 응답 본문엔 노출하지 않는다(공격자에게 오라클을 주지 않기 위함).
+    console.warn("webhook 서명 검증 실패:", verdict.reason);
+    return json(401, { error: "서명 검증 실패" });
   }
 
   let event: {
@@ -107,12 +109,18 @@ export async function handleUpdateSettings(
     const principal = await authenticate(ctx.db, header(req, "authorization"));
     requireAdmin(principal); // 일반 멤버는 설정 변경 불가
 
-    let settings: RuleSettings;
+    let parsed: unknown;
     try {
-      settings = JSON.parse(req.rawBody) as RuleSettings;
+      parsed = JSON.parse(req.rawBody);
     } catch {
       return json(400, { error: "잘못된 JSON" });
     }
+    if (!isRuleSettingsShape(parsed)) {
+      return json(422, {
+        error: "설정 형식이 올바르지 않습니다. 모든 기준값은 유한한 0 이상의 숫자여야 합니다.",
+      });
+    }
+    const settings: RuleSettings = parsed;
 
     const validation = validateRoomSettings(settings, args.sessionDurationMinutes);
     if (!validation.valid) {
@@ -179,6 +187,39 @@ export async function handleSubmitReport(
   } catch (e) {
     return errorResponse(e);
   }
+}
+
+/** 유한한 0 이상의 숫자인지. (NaN/Infinity/음수/비숫자 거부) */
+function isNonNegNum(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0;
+}
+
+/**
+ * 신뢰 못 할 입력이 RuleSettings 구조를 갖췄는지 런타임 검증.
+ * 관리자 입력이라도 누락/음수/NaN 같은 깨진 값을 DB 에 저장하지 않도록 막는다.
+ */
+function isRuleSettingsShape(v: unknown): v is RuleSettings {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  const w = s.weights as Record<string, unknown> | undefined;
+  const a = s.autoExit as Record<string, unknown> | undefined;
+  if (typeof w !== "object" || w === null) return false;
+  if (typeof a !== "object" || a === null) return false;
+  return (
+    isNonNegNum(s.lateGraceMinutes) &&
+    isNonNegNum(s.minAttendanceRatio) &&
+    s.minAttendanceRatio <= 1 &&
+    isNonNegNum(w.lateUnexcused) &&
+    isNonNegNum(w.absentUnexcused) &&
+    isNonNegNum(w.vagueAbsent) &&
+    isNonNegNum(w.disturbance) &&
+    isNonNegNum(s.maxDisturbancePerSession) &&
+    isNonNegNum(s.fineThreshold) &&
+    isNonNegNum(s.fineAmount) &&
+    isNonNegNum(s.personalLeaveWeeklyExemptLimit) &&
+    isNonNegNum(a.warnAfterConsecutiveFineWeeks) &&
+    isNonNegNum(a.exitAfterConsecutiveFineWeeks)
+  );
 }
 
 function header(req: HttpRequest, name: string): string | undefined {
