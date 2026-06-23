@@ -12,6 +12,8 @@ import { submitDisturbanceReport } from "./reports.ts";
 import { declareReason, approveOtherReason } from "./reasons.ts";
 import { computeMemberWeek } from "./aggregate.ts";
 import { computeWeekSettlement, runAutoExit } from "./settlement.ts";
+import { createMember, issueToken } from "./tokens.ts";
+import type { Role } from "./auth.ts";
 import { DEFAULT_SETTINGS } from "../settings.ts";
 import { validateRoomSettings } from "../validation.ts";
 import type { RuleSettings } from "../types.ts";
@@ -191,6 +193,56 @@ export async function handleSubmitReport(
       targetMemberId: body.targetMemberId,
     });
     return json(out.status === "recorded" ? 201 : 200, out);
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+/**
+ * GET /me — 토큰으로 내 신원 조회. 프론트가 역할(admin/member)에 따라 화면을 구성.
+ */
+export async function handleMe(
+  ctx: Ctx,
+  req: HttpRequest,
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    return json(200, principal);
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+/**
+ * POST /admin/members — 멤버 생성 + 1회용 토큰 발급. 관리자 전용.
+ * 반환된 token 은 이 응답에서만 보인다(서버엔 해시만 저장). 멤버에게 안전하게 전달.
+ */
+export async function handleCreateMember(
+  ctx: Ctx,
+  req: HttpRequest,
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    requireAdmin(principal);
+    let body: { id?: string; displayName?: string; role?: string };
+    try {
+      body = JSON.parse(req.rawBody);
+    } catch {
+      return json(400, { error: "잘못된 JSON" });
+    }
+    if (!body.id || !body.displayName) {
+      return json(400, { error: "id, displayName 필요" });
+    }
+    if (body.role !== undefined && body.role !== "admin" && body.role !== "member") {
+      return json(400, { error: "role 은 admin 또는 member 여야 합니다." });
+    }
+    await createMember(ctx.db, {
+      id: body.id,
+      displayName: body.displayName,
+      role: body.role as Role | undefined,
+    });
+    const token = await issueToken(ctx.db, body.id);
+    return json(201, { memberId: body.id, token });
   } catch (e) {
     return errorResponse(e);
   }

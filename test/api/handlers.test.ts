@@ -8,6 +8,8 @@ import {
   handleWeeklyStatus,
   handleSettlement,
   handleRunAutoExit,
+  handleMe,
+  handleCreateMember,
   type Ctx,
   type HttpRequest,
 } from "../../src/api/handlers.ts";
@@ -315,4 +317,59 @@ test("auto-exit: 관리자는 실행 가능(200)", async () => {
   const res = await handleRunAutoExit(ctx(fake), req, { throughMondayDate: "2026-06-22" });
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, { decisions: [] });
+});
+
+// ── /me, /admin/members ──
+
+test("me: 유효 토큰이면 신원 반환", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("admin")]);
+  const res = await handleMe(ctx(fake), {
+    method: "GET", path: "/me", rawBody: "",
+    headers: { authorization: "Bearer t" },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { memberId: "admin1", role: "admin" });
+});
+
+test("me: 토큰 없으면 401", async () => {
+  const res = await handleMe(ctx(new FakeQueryable()), {
+    method: "GET", path: "/me", rawBody: "", headers: {},
+  });
+  assert.equal(res.status, 401);
+});
+
+test("create member: 일반 멤버는 403", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("member")]);
+  const res = await handleCreateMember(ctx(fake), {
+    method: "POST", path: "/admin/members",
+    rawBody: JSON.stringify({ id: "m9", displayName: "x" }),
+    headers: { authorization: "Bearer t" },
+  });
+  assert.equal(res.status, 403);
+});
+
+test("create member: 관리자는 생성+토큰 발급(201), 토큰은 평문 1회 반환", async () => {
+  const fake = new FakeQueryable()
+    .enqueue([authRow("admin")]) // 인증
+    .enqueue([], 1) // createMember
+    .enqueue([], 1); // issueToken
+  const res = await handleCreateMember(ctx(fake), {
+    method: "POST", path: "/admin/members",
+    rawBody: JSON.stringify({ id: "m9", displayName: "민수" }),
+    headers: { authorization: "Bearer admin-token" },
+  });
+  assert.equal(res.status, 201);
+  const body = res.body as { memberId: string; token: string };
+  assert.equal(body.memberId, "m9");
+  assert.ok(body.token && body.token.length > 0);
+});
+
+test("create member: 잘못된 role 거부(400)", async () => {
+  const fake = new FakeQueryable().enqueue([authRow("admin")]);
+  const res = await handleCreateMember(ctx(fake), {
+    method: "POST", path: "/admin/members",
+    rawBody: JSON.stringify({ id: "m9", displayName: "x", role: "superuser" }),
+    headers: { authorization: "Bearer admin-token" },
+  });
+  assert.equal(res.status, 400);
 });

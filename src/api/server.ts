@@ -1,4 +1,7 @@
 import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Db, type Queryable } from "./db.ts";
 import { loadConfig, redactConfig } from "./config.ts";
 import {
@@ -11,6 +14,8 @@ import {
   handleWeeklyStatus,
   handleSettlement,
   handleRunAutoExit,
+  handleMe,
+  handleCreateMember,
   type Ctx,
   type HttpRequest,
   type HttpResponse,
@@ -60,6 +65,12 @@ async function route(ctx: Ctx, hreq: HttpRequest): Promise<HttpResponse> {
   if (method === "POST" && path === "/admin/reasons/approve") {
     return handleApproveReason(ctx, hreq);
   }
+  if (method === "GET" && path === "/me") {
+    return handleMe(ctx, hreq);
+  }
+  if (method === "POST" && path === "/admin/members") {
+    return handleCreateMember(ctx, hreq);
+  }
   let m = /^\/admin\/rooms\/([^/]+)\/settings$/.exec(path);
   if (method === "PUT" && m) {
     return handleUpdateSettings(ctx, hreq, {
@@ -96,6 +107,24 @@ async function route(ctx: Ctx, hreq: HttpRequest): Promise<HttpResponse> {
   return { status: 404, body: { error: "not found" } };
 }
 
+// 프론트엔드 단일 파일 경로. 한 파일만 서빙하므로 경로 조작(traversal) 위험이 없다.
+const PUBLIC_DIR = path.resolve(fileURLToPath(import.meta.url), "../../../public");
+
+/** GET / 또는 /index.html 이면 프론트엔드를 서빙. 그 외엔 null. */
+async function serveFrontend(
+  method: string,
+  pathname: string,
+): Promise<{ status: number; contentType: string; body: string } | null> {
+  if (method !== "GET") return null;
+  if (pathname !== "/" && pathname !== "/index.html") return null;
+  try {
+    const html = await fs.readFile(path.join(PUBLIC_DIR, "index.html"), "utf8");
+    return { status: 200, contentType: "text/html; charset=utf-8", body: html };
+  } catch {
+    return null;
+  }
+}
+
 /** Queryable(예: pg.Pool)을 주입해 http 서버를 만든다. */
 export function createServer(pool: Queryable): http.Server {
   const config = loadConfig();
@@ -105,10 +134,19 @@ export function createServer(pool: Queryable): http.Server {
 
   return http.createServer(async (req, res) => {
     try {
-      const rawBody = await readRawBody(req);
       const url = new URL(req.url ?? "/", "http://localhost");
+      const method = req.method ?? "GET";
+
+      const fe = await serveFrontend(method, url.pathname);
+      if (fe) {
+        res.writeHead(fe.status, { "content-type": fe.contentType });
+        res.end(fe.body);
+        return;
+      }
+
+      const rawBody = await readRawBody(req);
       const hreq: HttpRequest = {
-        method: req.method ?? "GET",
+        method,
         path: url.pathname,
         headers: req.headers,
         rawBody,

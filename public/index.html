@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>study-monster</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --line:#2a2f3a; --fg:#e6e8ec; --muted:#9aa3b2;
+          --accent:#5b8def; --ok:#3fb950; --bad:#f85149; --warn:#d29922; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         background:var(--bg); color:var(--fg); line-height:1.5; }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex;
+           align-items:center; gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  .badge { font-size:12px; padding:2px 8px; border-radius:999px; background:var(--card);
+           border:1px solid var(--line); color:var(--muted); }
+  main { max-width:760px; margin:0 auto; padding:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:16px 18px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:8px 0 4px; }
+  input, select { width:100%; padding:9px 11px; background:#0e1014; color:var(--fg);
+          border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:140px; }
+  button { margin-top:12px; padding:9px 14px; background:var(--accent); color:#fff;
+           border:0; border-radius:8px; font-size:14px; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .hidden { display:none; }
+  pre { background:#0e1014; border:1px solid var(--line); border-radius:8px; padding:12px;
+        overflow:auto; font-size:12.5px; white-space:pre-wrap; word-break:break-all; margin:10px 0 0; }
+  .out { font-size:13px; margin-top:10px; }
+  .out.ok { color:var(--ok); } .out.bad { color:var(--bad); }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tabs button { margin:0; }
+  .muted { color:var(--muted); font-size:13px; }
+  code { background:#0e1014; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🦖 study-monster</h1>
+  <span id="who" class="badge">로그인 안 됨</span>
+  <span style="flex:1"></span>
+  <button id="logoutBtn" class="ghost hidden" style="margin:0">로그아웃</button>
+</header>
+<main>
+
+  <!-- 로그인 -->
+  <section id="loginCard" class="card">
+    <h2>접속</h2>
+    <p class="muted">관리자가 발급한 <b>액세스 토큰</b>을 붙여넣으세요.
+       (관리자는 dev 서버 기동 시 콘솔에 출력된 토큰 사용)</p>
+    <label>액세스 토큰</label>
+    <input id="tokenInput" placeholder="Bearer 없이 토큰 값만" />
+    <button id="loginBtn">접속</button>
+    <div id="loginOut" class="out"></div>
+  </section>
+
+  <!-- 멤버 영역 -->
+  <section id="memberArea" class="hidden">
+    <div class="card">
+      <h2>내 이번 주 현황</h2>
+      <div class="row">
+        <div><label>주 시작(월요일, YYYY-MM-DD)</label><input id="wkMonday" /></div>
+      </div>
+      <button id="weeklyBtn">조회</button>
+      <div id="weeklyOut"></div>
+    </div>
+
+    <div class="card">
+      <h2>출결 사유 신고 <span class="muted">(본인)</span></h2>
+      <div class="row">
+        <div><label>세션 ID</label><input id="rsSession" placeholder="예: s1" /></div>
+        <div><label>사유</label>
+          <select id="rsReason">
+            <option value="OVERTIME">야근/업무 (자동 정당)</option>
+            <option value="SELF_DEVELOPMENT">자기개발 (자동 정당)</option>
+            <option value="VAGUE_PERSONAL">개인사정 (무단, 주 2회 면제)</option>
+            <option value="OTHER">기타 (관리자 승인 필요)</option>
+          </select>
+        </div>
+      </div>
+      <button id="reasonBtn">사유 신고</button>
+      <div id="reasonOut" class="out"></div>
+    </div>
+
+    <div class="card">
+      <h2>분위기저해 신고</h2>
+      <div class="row">
+        <div><label>세션 ID</label><input id="dsSession" placeholder="예: s1" /></div>
+        <div><label>대상 멤버 ID</label><input id="dsTarget" placeholder="예: m2" /></div>
+      </div>
+      <button id="reportBtn">신고</button>
+      <div id="reportOut" class="out"></div>
+    </div>
+  </section>
+
+  <!-- 관리자 영역 -->
+  <section id="adminArea" class="hidden">
+    <div class="card">
+      <h2>👑 멤버 추가 + 토큰 발급</h2>
+      <div class="row">
+        <div><label>멤버 ID</label><input id="nmId" placeholder="예: m3" /></div>
+        <div><label>이름</label><input id="nmName" placeholder="예: 민수" /></div>
+        <div><label>역할</label>
+          <select id="nmRole"><option value="member">member</option><option value="admin">admin</option></select>
+        </div>
+      </div>
+      <button id="createBtn">생성</button>
+      <div id="createOut"></div>
+    </div>
+
+    <div class="card">
+      <h2>👑 정산 (n분의1 환급)</h2>
+      <label>주 시작(월요일)</label><input id="stMonday" />
+      <button id="settleBtn">정산 조회</button>
+      <div id="settleOut"></div>
+    </div>
+
+    <div class="card">
+      <h2>👑 자동 퇴장 실행</h2>
+      <label>기준 주(월요일)</label><input id="aeMonday" />
+      <button id="autoExitBtn">실행</button>
+      <div id="autoExitOut"></div>
+    </div>
+
+    <div class="card">
+      <h2>👑 강제 퇴장</h2>
+      <label>멤버 ID</label><input id="feId" placeholder="예: m2" />
+      <button id="forceExitBtn">퇴장</button>
+      <div id="feOut" class="out"></div>
+    </div>
+
+    <div class="card">
+      <h2>👑 OTHER 사유 승인</h2>
+      <div class="row">
+        <div><label>세션 ID</label><input id="apSession" /></div>
+        <div><label>멤버 ID</label><input id="apMember" /></div>
+      </div>
+      <button id="approveBtn">승인</button>
+      <div id="approveOut" class="out"></div>
+    </div>
+  </section>
+
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let token = localStorage.getItem("sm_token") || "";
+
+function thisMonday() {
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7; // 월=0
+  d.setDate(d.getDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+
+async function api(method, path, body) {
+  const headers = {};
+  if (token) headers["authorization"] = "Bearer " + token;
+  if (body) headers["content-type"] = "application/json";
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  let data = null;
+  try { data = await res.json(); } catch {}
+  return { status: res.status, data };
+}
+
+function show(el, ok, text) {
+  el.className = "out " + (ok ? "ok" : "bad");
+  el.textContent = text;
+}
+// XSS 방지: API 응답을 innerHTML 이 아니라 textContent 로 출력(데이터에 HTML이 섞여도 무해).
+function dump(el, data) {
+  el.replaceChildren();
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(data, null, 2);
+  el.appendChild(pre);
+}
+
+async function refreshIdentity() {
+  if (!token) return setLoggedOut();
+  const { status, data } = await api("GET", "/me");
+  if (status === 200) {
+    $("who").textContent = data.memberId + " · " + data.role;
+    $("loginCard").classList.add("hidden");
+    $("logoutBtn").classList.remove("hidden");
+    $("memberArea").classList.remove("hidden");
+    $("adminArea").classList.toggle("hidden", data.role !== "admin");
+  } else {
+    show($("loginOut"), false, "토큰이 유효하지 않습니다 (" + status + ")");
+    setLoggedOut();
+  }
+}
+function setLoggedOut() {
+  $("who").textContent = "로그인 안 됨";
+  $("loginCard").classList.remove("hidden");
+  $("logoutBtn").classList.add("hidden");
+  $("memberArea").classList.add("hidden");
+  $("adminArea").classList.add("hidden");
+}
+
+$("loginBtn").onclick = async () => {
+  token = $("tokenInput").value.trim();
+  localStorage.setItem("sm_token", token);
+  await refreshIdentity();
+};
+$("logoutBtn").onclick = () => { token = ""; localStorage.removeItem("sm_token"); setLoggedOut(); };
+
+$("weeklyBtn").onclick = async () => {
+  const me = (await api("GET", "/me")).data;
+  const monday = $("wkMonday").value.trim();
+  const { status, data } = await api("GET",
+    "/weekly?memberId=" + encodeURIComponent(me.memberId) + "&mondayDate=" + encodeURIComponent(monday));
+  status === 200 ? dump($("weeklyOut"), data) : show($("weeklyOut"), false, "오류 " + status + ": " + (data?.error||""));
+};
+
+$("reasonBtn").onclick = async () => {
+  const { status, data } = await api("POST", "/reasons",
+    { sessionId: $("rsSession").value.trim(), reason: $("rsReason").value });
+  show($("reasonOut"), status === 200, status === 200 ? "신고됨: " + data.reason : "오류 " + status + ": " + (data?.error||""));
+};
+
+$("reportBtn").onclick = async () => {
+  const { status, data } = await api("POST", "/reports/disturbance",
+    { sessionId: $("dsSession").value.trim(), targetMemberId: $("dsTarget").value.trim() });
+  const ok = status === 201 || status === 200;
+  show($("reportOut"), ok, ok ? "결과: " + (data.status || "ok") : "오류 " + status + ": " + (data?.error||""));
+};
+
+$("createBtn").onclick = async () => {
+  const { status, data } = await api("POST", "/admin/members",
+    { id: $("nmId").value.trim(), displayName: $("nmName").value.trim(), role: $("nmRole").value });
+  if (status === 201) {
+    const out = $("createOut");
+    out.replaceChildren();
+    const msg = document.createElement("div");
+    msg.className = "out ok";
+    msg.textContent = "생성됨. 아래 토큰을 멤버에게 전달하세요(한 번만 표시):";
+    const pre = document.createElement("pre");
+    pre.textContent = data.token; // 토큰은 base64url 이지만 안전하게 textContent
+    out.append(msg, pre);
+  } else show($("createOut"), false, "오류 " + status + ": " + (data?.error||""));
+};
+
+$("settleBtn").onclick = async () => {
+  const { status, data } = await api("GET", "/admin/settlement?mondayDate=" + encodeURIComponent($("stMonday").value.trim()));
+  status === 200 ? dump($("settleOut"), data) : show($("settleOut"), false, "오류 " + status + ": " + (data?.error||""));
+};
+
+$("autoExitBtn").onclick = async () => {
+  const { status, data } = await api("POST", "/admin/auto-exit/run?mondayDate=" + encodeURIComponent($("aeMonday").value.trim()));
+  status === 200 ? dump($("autoExitOut"), data) : show($("autoExitOut"), false, "오류 " + status + ": " + (data?.error||""));
+};
+
+$("forceExitBtn").onclick = async () => {
+  const id = $("feId").value.trim();
+  const { status, data } = await api("POST", "/admin/members/" + encodeURIComponent(id) + "/exit");
+  show($("feOut"), status === 200, status === 200 ? id + " 퇴장 처리됨" : "오류 " + status + ": " + (data?.error||""));
+};
+
+$("approveBtn").onclick = async () => {
+  const { status, data } = await api("POST", "/admin/reasons/approve",
+    { sessionId: $("apSession").value.trim(), memberId: $("apMember").value.trim() });
+  show($("approveOut"), status === 200, status === 200 ? "승인됨" : "오류 " + status + ": " + (data?.error||""));
+};
+
+// 초기화
+[ "wkMonday", "stMonday", "aeMonday" ].forEach((id) => $(id).value = thisMonday());
+if (token) $("tokenInput").value = token;
+refreshIdentity();
+</script>
+</body>
+</html>
