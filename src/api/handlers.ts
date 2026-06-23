@@ -1,0 +1,187 @@
+import { Db, sql } from "./db.ts";
+import type { AppConfig } from "./config.ts";
+import { verifyDailyWebhook } from "./webhook.ts";
+import {
+  authenticate,
+  requireAdmin,
+  AuthnError,
+  AuthzError,
+} from "./auth.ts";
+import { submitDisturbanceReport } from "./reports.ts";
+import { validateRoomSettings } from "../validation.ts";
+import type { RuleSettings } from "../types.ts";
+
+// 보안 모듈을 실제 엔드포인트로 묶는 라우트 레이어.
+// 프레임워크 비종속: 요청/응답을 단순 객체로 다뤄 HTTP 서버 없이도 테스트 가능.
+// (Next.js route / node http 어느 쪽에도 얇게 끼울 수 있다.)
+
+export interface HttpRequest {
+  method: string;
+  /** 정규화된 경로 (예: "/webhooks/daily"). */
+  path: string;
+  headers: Record<string, string | string[] | undefined>;
+  /** 검증을 위해 반드시 raw 문자열로 보존 (재직렬화 금지). */
+  rawBody: string;
+}
+
+export interface HttpResponse {
+  status: number;
+  body: unknown;
+}
+
+export interface Ctx {
+  db: Db;
+  config: AppConfig;
+}
+
+function json(status: number, body: unknown): HttpResponse {
+  return { status, body };
+}
+
+/** 인증/인가 예외를 적절한 상태코드로 변환. */
+function errorResponse(e: unknown): HttpResponse {
+  if (e instanceof AuthnError) return json(e.status, { error: e.message });
+  if (e instanceof AuthzError) return json(e.status, { error: e.message });
+  // 내부 오류는 상세를 노출하지 않는다.
+  return json(500, { error: "내부 오류" });
+}
+
+/**
+ * POST /webhooks/daily — Daily 출석 이벤트 수신.
+ * 핵심 신뢰경계: 서명 검증을 통과하지 못한 요청은 DB 에 닿기 전에 거부한다.
+ */
+export async function handleDailyWebhook(
+  ctx: Ctx,
+  req: HttpRequest,
+): Promise<HttpResponse> {
+  const verdict = verifyDailyWebhook(req.rawBody, req.headers, {
+    secret: ctx.config.dailyWebhookSecret,
+    toleranceSeconds: ctx.config.webhookToleranceSeconds,
+  });
+  if (!verdict.ok) {
+    // 위조/replay 시도는 401. 이유는 로깅용으로만, 응답엔 최소 정보.
+    return json(401, { error: "서명 검증 실패", reason: verdict.reason });
+  }
+
+  let event: {
+    type?: string;
+    daily_event_id?: string;
+    payload?: { session_id?: string; member_id?: string; at?: string };
+  };
+  try {
+    event = JSON.parse(req.rawBody);
+  } catch {
+    return json(400, { error: "잘못된 JSON" });
+  }
+
+  const kind =
+    event.type === "participant.joined"
+      ? "join"
+      : event.type === "participant.left"
+        ? "leave"
+        : null;
+  const p = event.payload;
+  if (!kind || !p?.session_id || !p?.member_id || !p?.at) {
+    return json(400, { error: "지원하지 않거나 불완전한 이벤트" });
+  }
+
+  // 멱등 삽입: 같은 Daily 이벤트 중복 수신 시 한 번만 반영 (replay 보강).
+  await ctx.db.run(sql`
+    INSERT INTO presence_events (session_id, member_id, kind, at, daily_event_id)
+    VALUES (${p.session_id}, ${p.member_id}, ${kind}, ${p.at}, ${event.daily_event_id ?? null})
+    ON CONFLICT (daily_event_id) DO NOTHING
+  `);
+
+  return json(200, { ok: true });
+}
+
+/**
+ * PUT /admin/rooms/:roomId/settings — 규칙 설정 변경. 관리자 전용.
+ */
+export async function handleUpdateSettings(
+  ctx: Ctx,
+  req: HttpRequest,
+  args: { roomId: string; sessionDurationMinutes: number },
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    requireAdmin(principal); // 일반 멤버는 설정 변경 불가
+
+    let settings: RuleSettings;
+    try {
+      settings = JSON.parse(req.rawBody) as RuleSettings;
+    } catch {
+      return json(400, { error: "잘못된 JSON" });
+    }
+
+    const validation = validateRoomSettings(settings, args.sessionDurationMinutes);
+    if (!validation.valid) {
+      return json(422, { error: "설정 검증 실패", details: validation.errors });
+    }
+
+    await ctx.db.run(sql`
+      INSERT INTO rule_settings (room_id, settings, updated_by)
+      VALUES (${args.roomId}, ${JSON.stringify(settings)}, ${principal.memberId})
+      ON CONFLICT (room_id)
+      DO UPDATE SET settings = EXCLUDED.settings,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = now()
+    `);
+    return json(200, { ok: true });
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+/**
+ * POST /admin/members/:memberId/exit — 강제 퇴장(비활성화). 관리자 전용.
+ */
+export async function handleForceExit(
+  ctx: Ctx,
+  req: HttpRequest,
+  args: { memberId: string },
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    requireAdmin(principal);
+    await ctx.db.run(sql`
+      UPDATE members SET active = FALSE WHERE id = ${args.memberId}
+    `);
+    return json(200, { ok: true });
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+/**
+ * POST /reports/disturbance — 분위기저해 신고. 인증된 멤버만, 중복/자기신고 차단.
+ */
+export async function handleSubmitReport(
+  ctx: Ctx,
+  req: HttpRequest,
+): Promise<HttpResponse> {
+  try {
+    const principal = await authenticate(ctx.db, header(req, "authorization"));
+    let body: { sessionId?: string; targetMemberId?: string };
+    try {
+      body = JSON.parse(req.rawBody);
+    } catch {
+      return json(400, { error: "잘못된 JSON" });
+    }
+    if (!body.sessionId || !body.targetMemberId) {
+      return json(400, { error: "sessionId, targetMemberId 필요" });
+    }
+    const out = await submitDisturbanceReport(ctx.db, principal, {
+      sessionId: body.sessionId,
+      targetMemberId: body.targetMemberId,
+    });
+    return json(out.status === "recorded" ? 201 : 200, out);
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
+
+function header(req: HttpRequest, name: string): string | undefined {
+  const v = req.headers[name] ?? req.headers[name.toLowerCase()];
+  return Array.isArray(v) ? v[0] : v;
+}
