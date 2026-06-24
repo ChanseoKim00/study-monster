@@ -8,7 +8,7 @@ import { createPgPool, asQueryable } from "./pg.ts";
 import { migrate } from "./migrate.ts";
 import { createServer } from "./server.ts";
 import { Db } from "./db.ts";
-import { bootstrapAdmin } from "./tokens.ts";
+import { bootstrapAdmin, reissueAdminToken } from "./tokens.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 
@@ -20,7 +20,11 @@ const queryable = asQueryable(pool);
 await migrate(queryable);
 
 // 최초 관리자 부트스트랩: ADMIN_BOOTSTRAP_ID 가 있고 관리자가 없을 때만.
-const boot = await bootstrapAdmin(new Db(queryable));
+const db = new Db(queryable);
+const env = process.env;
+const adminId = env.ADMIN_BOOTSTRAP_ID?.trim();
+const reissueRequested = env.ADMIN_REISSUE_TOKEN?.trim() === "true";
+const boot = await bootstrapAdmin(db);
 if (boot.created) {
   console.log("======================================================");
   console.log(" 최초 관리자 생성됨 (이 토큰은 이 로그에서만 1회 표시)");
@@ -29,6 +33,26 @@ if (boot.created) {
   console.log(" → 프론트에 붙여넣어 로그인하세요. 로그인 후 토큰을 보관하고");
   console.log("   ADMIN_BOOTSTRAP_ID 변수는 제거해도 됩니다.");
   console.log("======================================================");
+} else if (!adminId) {
+  // 진단: 부트스트랩 스킵 사유를 로그에 명시한다 (env 누락이 가장 흔한 사고).
+  console.log(
+    "[admin-bootstrap] ADMIN_BOOTSTRAP_ID 미설정 — 관리자 시드 스킵. " +
+      "최초 1회 발급이 필요하면 Railway 환경변수에 ADMIN_BOOTSTRAP_ID=admin 을 설정하고 재배포하세요.",
+  );
+} else if (reissueRequested) {
+  // env 는 있고 관리자도 이미 존재 — 분실 복구를 위해 새 토큰 강제 발급.
+  const newToken = await reissueAdminToken(db, adminId);
+  console.log("======================================================");
+  console.log(" 관리자 토큰 재발급 (이 토큰은 이 로그에서만 1회 표시)");
+  console.log("   memberId :", adminId);
+  console.log("   token    :", newToken);
+  console.log(" → 사용 후 ADMIN_REISSUE_TOKEN 변수는 반드시 제거하세요.");
+  console.log("======================================================");
+} else {
+  console.log(
+    "[admin-bootstrap] 관리자 이미 존재 — 새 토큰 발급 없이 스킵. " +
+      "토큰을 분실했다면 ADMIN_REISSUE_TOKEN=true 를 설정하고 재배포하세요.",
+  );
 }
 
 const server = createServer(queryable);

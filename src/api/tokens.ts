@@ -69,6 +69,41 @@ export async function seedAdminIfNone(
   return issueToken(db, params.id);
 }
 
+/**
+ * 분실 복구용: 지정 멤버에게 새 토큰을 발급한다.
+ * - 대상이 존재하지 않거나 admin 이 아니면 예외 (권한 상승 차단).
+ * - 기존 토큰은 모두 폐기해 분실/유출 시 즉시 무력화한다.
+ * - 평문은 호출자(=로그)로 1회만 반환. DB 엔 해시만 남는다.
+ *
+ * 운영 흐름: 토큰을 잃은 관리자가 Railway 에 ADMIN_REISSUE_TOKEN=true 를 설정 →
+ * 재배포 → 로그로 새 토큰 수령 → env var 제거.
+ */
+export async function reissueAdminToken(
+  db: Db,
+  memberId: string,
+): Promise<string> {
+  const row = await db.one<{ role: string; active: boolean }>(sql`
+    SELECT role, active FROM members WHERE id = ${memberId}
+  `);
+  if (!row) {
+    throw new Error(
+      `관리자 토큰 재발급 실패: 멤버 '${memberId}' 가 존재하지 않습니다.`,
+    );
+  }
+  if (row.role !== "admin") {
+    throw new Error(
+      `관리자 토큰 재발급 실패: '${memberId}' 는 관리자가 아닙니다.`,
+    );
+  }
+  // 기존 토큰 폐기 (분실/유출 가정 — 새 토큰만 살린다).
+  await db.run(sql`DELETE FROM auth_tokens WHERE member_id = ${memberId}`);
+  // 비활성 관리자라도 복구는 가능해야 하므로 active 복원.
+  if (!row.active) {
+    await db.run(sql`UPDATE members SET active = TRUE WHERE id = ${memberId}`);
+  }
+  return issueToken(db, memberId);
+}
+
 export interface BootstrapResult {
   /** 이번 부팅에서 관리자를 새로 만들었는지. */
   created: boolean;
